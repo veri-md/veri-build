@@ -664,8 +664,10 @@ def _run_dafny_interface(dfy_text: str, module_name: str,
         dfy_path = tmp / f'{module_name}.dfy'
         dfy_path.write_text(dfy_text)
 
-        # Dafny needs to verify the interface
-        cmd = [dafny, 'verify', str(dfy_path)]
+        # Dafny needs to verify the interface. Allow warnings: a spec under lint
+        # legitimately contains bodyless #TODO functions (their bodies are filled
+        # at compile time), which Dafny warns about and otherwise fails on.
+        cmd = [dafny, 'verify', '--allow-warnings', str(dfy_path)]
 
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
