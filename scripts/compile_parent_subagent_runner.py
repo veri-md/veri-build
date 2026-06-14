@@ -852,8 +852,12 @@ def main():
                 result['agent_verification_stderr'] = agent_stderr[-500:] if agent_stderr else ''
 
                 if agent_passed:
-                    veri_from_agent = convert_to_veri(full_module, args.target)
-                    result['veri_from_agent'] = veri_from_agent
+                    # Back-conversion to Veri DSL is informational only — don't
+                    # let a roundtrip parse failure block compilation.
+                    try:
+                        result['veri_from_agent'] = convert_to_veri(full_module, args.target)
+                    except Exception as e:
+                        result['veri_from_agent_error'] = str(e)
 
                     # Step 6: Compile the verified agent code
                     try:
