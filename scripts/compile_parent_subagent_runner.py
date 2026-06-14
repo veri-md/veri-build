@@ -818,7 +818,7 @@ def main():
         try:
             output_path = compile_verified_code(
                 interface_text, spec, args.target,
-                output_dir=Path('/results'),
+                output_dir=Path('/output'),
             )
             if output_path:
                 result['output_path'] = output_path
@@ -859,7 +859,7 @@ def main():
                     try:
                         output_path = compile_verified_code(
                             agent_output, spec, args.target,
-                            output_dir=Path('/results'),
+                            output_dir=Path('/output'),
                         )
                         if output_path:
                             result['output_path'] = output_path
