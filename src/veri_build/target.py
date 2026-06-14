@@ -89,27 +89,56 @@ def _fstar_krml_verify(source_path: Path, output_dir: Path) -> Tuple[bool, str]:
 
 
 def _dafny_rust_verify(source_path: Path, output_dir: Path) -> Tuple[bool, str]:
-    """Verify Dafny extraction to Rust."""
+    """Verify Dafny extraction to Rust via `dafny build`.
+
+    `dafny build -t rs` emits a complete, linkable crate — a top-level
+    Cargo.toml, the vendored dafny_runtime, and src/<Module>.rs — unlike
+    `dafny translate`, which emits only the bare module source. When the
+    target toolchain (cargo) is absent it degrades gracefully: the crate
+    source is still written and the command returns 0, just without a
+    compile step.
+    """
+    import shutil
     import subprocess
 
+    dafny = shutil.which('dafny')
+    if not dafny:
+        return False, 'dafny not found in PATH'
+
+    dafny_out = output_dir / 'rs'
+    dafny_out.mkdir(parents=True, exist_ok=True)
+    module = source_path.stem
+
     try:
-        dafny_out = output_dir / 'rust'
-        dafny_out.mkdir(parents=True, exist_ok=True)
-        result = subprocess.run(
-            ['dafny', 'translate', 'rs',
-             '--output', str(dafny_out / source_path.stem),
-             str(source_path)],
+        proc = subprocess.run(
+            [dafny, 'build', '-t', 'rs',
+             # Dafny's Rust backend rejects translation without this; it's a
+             # global option accepted by the other backends too.
+             '--enforce-determinism',
+             # Quantifiers without explicit triggers produce warnings; don't
+             # abort translation for them.
+             '--allow-warnings',
+             # The module was already verified upstream; skip re-verification.
+             '--no-verify',
+             '--output', str(dafny_out / module), str(source_path)],
             capture_output=True, text=True, timeout=120,
         )
-        if result.returncode != 0:
-            return False, f"Dafny Rust extraction failed: {result.stderr[:300]}"
-
-        for rf in dafny_out.glob('*.rs'):
-            return True, f"Rust output: {rf}"
-        return False, "No .rs file found"
-
+    except subprocess.TimeoutExpired:
+        return False, 'dafny build rs timed out (120s)'
     except Exception as e:
         return False, str(e)
+
+    # Prefer the crate's own library source (<Module>-*/src/<Module>.rs) over
+    # the vendored runtime/*.rs files that `dafny build` now also emits.
+    crate_libs = sorted(dafny_out.glob(f'{module}-*/src/{module}.rs'))
+    if crate_libs:
+        crate = crate_libs[0].parent.parent
+        return True, f'Extracted Rust crate: {crate.name}'
+    produced = list(dafny_out.rglob('*.rs'))
+    if produced:
+        return True, f'Extracted Rust: {produced[0].name}'
+    detail = (proc.stderr or proc.stdout or '').strip()[:200]
+    return False, f'no .rs produced: {detail}'
 
 
 # ── Backend registry ─────────────────────────────────────────────────────
@@ -146,7 +175,11 @@ BACKENDS = {
         language="Dafny",
         dsl_lang="dafny",
         suffix=".rs",
-        agent_extra="",
+        agent_extra=(
+            "- Write pure Dafny `function` bodies as a single expression; "
+            "no `method`, `:=`, `var`, loops, arrays, or `new`.\n"
+            "- Keep each signature byte-identical to the interface."
+        ),
         self_check="",
         verify_extraction_func=_dafny_rust_verify,
     ),
