@@ -70,6 +70,27 @@ def _get_backend(target: str):
 
 # ── Step 2: Generate target interface ──────────────────────────────────
 
+_DAFNY_DECL_KW = r'(?:function method|function|method|predicate|lemma)'
+
+
+def strip_todo_declarations(text: str, names) -> str:
+    """Remove only the TODO function declarations from generated Dafny.
+
+    The agent supplies bodied implementations of the TODO functions; their
+    bodyless declarations in the interface would duplicate-define them when
+    stitched together. We strip *only* those named declarations (bodied or
+    bodyless) and leave helper predicates (e.g. ``is_sorted``) and types
+    intact — the agent's body and the ``ensures`` still reference them.
+    """
+    for name in names:
+        pat = (r'^[ \t]*' + _DAFNY_DECL_KW + r'\s+' + re.escape(name) + r'\b'
+               r'.*?'  # signature + contracts (+ body, if the decl has one)
+               r'(?=^[ \t]*(?:' + _DAFNY_DECL_KW + r'|type|datatype|const|ghost|class|module)\b'
+               r'|^[ \t]*\}|\Z)')
+        text = re.sub(pat, '', text, flags=re.MULTILINE | re.DOTALL)
+    return text
+
+
 def generate_target_interface(spec, target: str):
     """Generate interface-only code (no implementations)."""
     sys.path.insert(0, '/opt/veri-build/src/veri_build/dsl/src')
@@ -286,8 +307,11 @@ def compile_verified_code(code: str, spec, target: str, output_dir: Path) -> Opt
         # For Dafny, write a complete .dfy with spec + implementations
         dfy_path = output_dir / f'{module_name}.dfy'
 
-        # Generate Dafny interface (types + method sigs)
+        # Generate Dafny interface (types + method sigs). Strip the bodyless
+        # TODO declarations — the agent's code supplies bodied versions, and a
+        # leftover bodyless function can't be extracted by `dafny translate rs`.
         interface_text, _ = generate_target_interface(spec, target)
+        interface_text = strip_todo_declarations(interface_text, spec.todo_function_names)
 
         # Append agent code (implementations)
         dfy_text = interface_text + '\n' + code
@@ -585,8 +609,8 @@ def launch_agent(spec, target: str, agent_type: str, timeout: int,
             if dsl_lang == 'fstar':
                 types_text = re.sub(r'^(assume\s+)?val\s+\w+.*?(\n\s|\n$)', '', types_text, flags=re.MULTILINE)
             elif dsl_lang == 'dafny':
-                # Remove the existing function declarations (keep types/datatypes)
-                types_text = re.sub(r'^\s*(function|function method|method)\s+\w+.*?\{[^}]*\}', '', types_text, flags=re.MULTILINE | re.DOTALL)
+                # Remove only the TODO declarations (keep helper predicates + types)
+                types_text = strip_todo_declarations(types_text, spec.todo_function_names)
             full_module = types_text + '\n' + code
             passed, stdout, stderr = verify_interface(
                 full_module, spec.module_name, target,
@@ -843,7 +867,7 @@ def main():
                 if dsl_lang == 'fstar':
                     types_text = re.sub(r'^(assume\s+)?val\s+\w+.*?(\n\s|\n$)', '', types_text, flags=re.MULTILINE)
                 elif dsl_lang == 'dafny':
-                    types_text = re.sub(r'^\s*(function|function method|method)\s+\w+.*?\{[^}]*\}', '', types_text, flags=re.MULTILINE | re.DOTALL)
+                    types_text = strip_todo_declarations(types_text, spec.todo_function_names)
                 full_module = types_text + '\n' + agent_output
                 agent_passed, agent_stdout, agent_stderr = verify_interface(
                     full_module, spec.module_name, args.target)
