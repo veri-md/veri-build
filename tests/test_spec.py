@@ -9,7 +9,8 @@ _src = Path(__file__).resolve().parents[1] / "src"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
-from veri_build.spec import read_spec, generate_fsti, extract_blocks
+from veri_build.spec import read_spec, generate_interface as generate_fsti, extract_blocks
+from veri_build.pipeline import _generate_dafny_stubs
 
 
 def test_extract_blocks():
@@ -216,5 +217,61 @@ def test_no_blocks_raises():
             assert False, "Should have raised"
         except ValueError:
             pass
+    finally:
+        tmp.unlink()
+
+
+def test_dafny_stubs_preserve_contracts():
+    """Regression test for issue #10: _generate_dafny_stubs must preserve contracts."""
+    md = """\
+```veri
+TARGET dafny-rust
+VERI_VERSION 0.0.2
+
+def step(n: nat) -> nat:
+    REQUIRES True
+
+#TODO
+```
+
+```veri
+def double(n: nat) -> nat:
+    REQUIRES n >= 0
+    ENSURES result >= n
+
+#TODO
+```
+
+```veri
+def countdown(n: nat) -> nat:
+    REQUIRES n >= 0
+    ENSURES result == 0
+    DECREASES n
+
+#TODO
+```
+"""
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".veri.md", delete=False
+    ) as f:
+        f.write(md)
+        tmp = Path(f.name)
+
+    try:
+        spec = read_spec(tmp)
+        stubs = _generate_dafny_stubs(spec)
+
+        # Contracts must appear in stubs
+        assert "requires true" in stubs, "REQUIRES clause missing from stub"
+        assert "requires n >= 0" in stubs, "REQUIRES clause missing from stub"
+        assert "ensures result >= n" in stubs, "ENSURES clause missing from stub"
+        assert "ensures result == 0" in stubs, "ENSURES clause missing from stub"
+        assert "decreases n" in stubs, "DECREASES clause missing from stub"
+
+        # Dafny 4 syntax: no 'function method'
+        assert "function method" not in stubs, "'function method' is Dafny 3 syntax"
+
+        # Named return must be emitted when ensures references 'result'
+        assert "(result: nat)" in stubs, "named return missing for ensures referencing result"
     finally:
         tmp.unlink()

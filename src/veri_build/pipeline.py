@@ -325,23 +325,28 @@ def _generate_dafny_stubs(spec) -> str:
             prog.add(decl)
             result.append(p.print(prog).strip())
 
-    # Add stub implementations for TODO functions
+    # Add stub implementations for TODO functions, preserving contracts for the sub-agent
     for fn_name in spec.todo_function_names:
         result.append(f'  // TODO: implement {fn_name}')
         for decl in spec.program.decls:
             from veri_ast import ValDecl
             if isinstance(decl, ValDecl) and decl.name == fn_name:
-                param_strs = []
                 from backend.dafny.printer import DafnyPrinter
                 printer = DafnyPrinter()
-                for param in decl.params:
-                    pname = param.name or '_'
-                    ptype = printer._type(param.typ) if param.typ else 'nat'
-                    param_strs.append(f'{pname}: {ptype}')
-                ret = 'nat'
-                if decl.return_type:
-                    ret = printer._type(decl.return_type)
-                result.append(f'  function method {fn_name}({", ".join(param_strs)}): {ret}')
+                param_strs = [
+                    f'{(p.name or "_")}: {printer._type(p.typ) if p.typ else "nat"}'
+                    for p in decl.params
+                ]
+                ret = printer._type(decl.return_type) if decl.return_type else 'nat'
+                ens_str = printer._expr(decl.contract.ensures) if decl.contract.ensures is not None else None
+                ret_str = printer._named_return(ret, ens_str)
+                result.append(f'  function {fn_name}({", ".join(param_strs)}): {ret_str}')
+                if decl.contract.requires:
+                    result.append(f'    requires {printer._expr(decl.contract.requires)}')
+                if ens_str is not None:
+                    result.append(f'    ensures {ens_str}')
+                if decl.contract.decreases:
+                    result.append(f'    decreases {printer._expr(decl.contract.decreases)}')
                 result.append(f'  {{')
                 if ret == 'bool':
                     result.append(f'    true')
