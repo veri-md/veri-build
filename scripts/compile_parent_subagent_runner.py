@@ -353,6 +353,10 @@ def _run_agent(prompt: str, agent_type: str, timeout: object = None) -> tuple:
             '--allowedTools', 'Bash', '--allowedTools', 'Read', '--allowedTools', 'Write',
             '--print',
         ]
+        # If ANTHROPIC_MODEL is set, pass --model to the claude CLI
+        anthro_model = os.environ.get('ANTHROPIC_MODEL', '')
+        if anthro_model:
+            cmd.extend(['--model', anthro_model])
         proc = subprocess.run(cmd, capture_output=True, text=True, env=claude_env)
         if proc.returncode != 0:
             err_msg = proc.stderr[:300] if proc.stderr else proc.stdout[:300]

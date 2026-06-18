@@ -271,6 +271,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.command == "lint":
         return cmd_lint(args)
+    elif args.command == "compile":
+        return cmd_compile(args)
     elif args.command == "verify":
         return cmd_verify(args)
     else:

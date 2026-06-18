@@ -71,10 +71,16 @@ def _extract_fstar(output: str) -> str:
     )
 
 
+def _resolve_model(default: str) -> str:
+    """Resolve model from ANTHROPIC_MODEL env var, falling back to default."""
+    import os
+    return os.environ.get("ANTHROPIC_MODEL", default)
+
+
 def call_claude(
     prompt: str,
     claude_bin: Optional[str] = None,
-    model: str = "claude-sonnet-4-5",
+    model: Optional[str] = None,
     timeout: int = 30,
 ) -> str:
     """Call Claude Code CLI subprocess to fill a TODO.
@@ -82,7 +88,7 @@ def call_claude(
     Args:
         prompt: The prompt containing the spec
         claude_bin: Path to claude binary (auto-detect if None)
-        model: Claude model name
+        model: Claude model name (default: ANTHROPIC_MODEL env or claude-sonnet-4-5)
         timeout: Subprocess timeout in seconds
 
     Returns:
@@ -94,8 +100,10 @@ def call_claude(
             "claude not found on PATH. Install it or use --child pi."
         )
 
+    resolved_model = model or _resolve_model("claude-sonnet-4-5")
+
     result = subprocess.run(
-        [claude, "-p", prompt, "--print", "--model", model],
+        [claude, "-p", prompt, "--print", "--model", resolved_model],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -112,7 +120,7 @@ def call_claude(
 def call_pi(
     prompt: str,
     pi_bin: Optional[str] = None,
-    model: str = "claude-sonnet-4-5",
+    model: Optional[str] = None,
     timeout: int = 30,
 ) -> str:
     """Call OpenClaw pi-coding-agent CLI subprocess to fill a TODO.
@@ -120,7 +128,7 @@ def call_pi(
     Args:
         prompt: The prompt containing the spec
         pi_bin: Path to pi binary (auto-detect if None)
-        model: Claude model name for pi to use
+        model: Model name for pi to use (default: ANTHROPIC_MODEL env or deepseek/deepseek-v4-pro)
         timeout: Subprocess timeout in seconds
 
     Returns:
@@ -132,8 +140,10 @@ def call_pi(
             "pi not found on PATH. Install it or use --child claude."
         )
 
+    resolved_model = model or _resolve_model("deepseek/deepseek-v4-pro")
+
     result = subprocess.run(
-        [pi, "--model", model, prompt],
+        [pi, "--model", resolved_model, prompt],
         capture_output=True,
         text=True,
         timeout=timeout,
