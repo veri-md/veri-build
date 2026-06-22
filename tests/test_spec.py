@@ -9,8 +9,87 @@ _src = Path(__file__).resolve().parents[1] / "src"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
-from veri_build.spec import read_spec, generate_interface as generate_fsti, extract_blocks
+from veri_build.spec import (
+    read_spec, generate_interface as generate_fsti, extract_blocks,
+    extract_todo_names,
+)
 from veri_build.pipeline import _generate_dafny_stubs
+
+
+def test_extract_todo_names_excludes_bodied_defs():
+    """Only body-less defs are TODOs. A bodied helper (a def with a `return`)
+    sharing the #TODO block is already implemented and must be excluded."""
+    block = (
+        "def double(n: nat) -> nat:\n"
+        "    return n + n\n"
+        "\n"
+        "def process(n: nat) -> nat:\n"
+        "    REQUIRES n >= 0\n"
+        "    ENSURES result >= n\n"
+        "\n"
+        "#TODO\n"
+    )
+    assert extract_todo_names(block) == ["process"]
+
+
+def test_extract_todo_names_all_bodyless():
+    """Several body-less defs in one block are all TODOs, in order."""
+    block = (
+        "def f(n: nat) -> nat:\n"
+        "    ENSURES result >= n\n"
+        "\n"
+        "def g(n: nat) -> nat:\n"
+        "    ENSURES result <= n\n"
+        "\n"
+        "#TODO\n"
+    )
+    assert extract_todo_names(block) == ["f", "g"]
+
+
+def test_extract_todo_names_multiline_signature():
+    """A body-less def whose signature spans several lines is still a TODO."""
+    block = (
+        "def combine(\n"
+        "    a: nat,\n"
+        "    b: nat,\n"
+        ") -> nat:\n"
+        "    REQUIRES a >= 0\n"
+        "    ENSURES result >= a\n"
+        "\n"
+        "#TODO\n"
+    )
+    assert extract_todo_names(block) == ["combine"]
+
+
+def test_read_spec_todo_block_mixes_bodied_and_bodyless():
+    """End-to-end: a #TODO block holding both implemented helpers and a
+    body-less function lists only the body-less one."""
+    md = """# M
+
+```veri
+def double(n: nat) -> nat:
+    return n + n
+
+def negate(b: bool) -> bool:
+    return not b
+
+def process(n: nat) -> nat:
+    REQUIRES n >= 0
+    ENSURES result >= n
+
+#TODO
+```
+"""
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".veri.md", delete=False
+    ) as f:
+        f.write(md)
+        tmp = Path(f.name)
+    try:
+        spec = read_spec(tmp)
+        assert spec.todo_function_names == ["process"], spec.todo_function_names
+    finally:
+        tmp.unlink()
 
 
 def test_extract_blocks():
