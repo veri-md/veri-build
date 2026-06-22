@@ -39,16 +39,28 @@ def detect_todo_blocks(blocks: List[str]) -> List[int]:
 
 
 def extract_todo_names(block: str) -> List[str]:
-    """Extract function names from #TODO blocks.
+    """Extract the names of the *unimplemented* functions in a #TODO block.
 
-    Looks for 'def <name>' lines in the block. Handles the case where
-    the block has a def with a body-less function signature (REQUIRES/ENSURES).
+    A block is marked for filling with a trailing ``#TODO``, but it may also
+    hold fully-implemented helpers (a ``def`` with a ``return``). Only the
+    body-less defs — a contract but no body — are holes the agent must fill; a
+    bodied def sharing the block is already implemented and must not be listed
+    (it would be needlessly re-implemented and, when emitted bodied in the
+    interface, mis-stitched).
     """
-    names = []
-    for line in block.split('\n'):
+    lines = block.split('\n')
+    starts = []
+    for i, line in enumerate(lines):
         m = re.match(r'^\s*def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(', line)
         if m:
-            names.append(m.group(1))
+            starts.append((i, m.group(1)))
+
+    names = []
+    for k, (i, name) in enumerate(starts):
+        end = starts[k + 1][0] if k + 1 < len(starts) else len(lines)
+        has_body = any(re.match(r'^\s*return\b', s) for s in lines[i:end])
+        if not has_body:
+            names.append(name)
     return names
 
 
