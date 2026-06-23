@@ -620,7 +620,15 @@ def launch_agent(spec, target: str, agent_type: str, timeout: int,
                 full_module, spec.module_name, target,
                     suffix=file_ext, admit_smt=True)
             if passed:
-                return code, None  # Success!
+                # For krml targets (fstar-c, fstar-wasm): try C compilation, re-prompt on failure
+                backend = _get_backend(target)
+                if hasattr(backend, 'output_suffix') and backend.output_suffix() in ('c', 'wasm'):
+                    output_path = compile_verified_code(code, spec, target, Path('/output'))
+                    if output_path:
+                        return code, None  # Success with C!
+                    last_response = 'Your code verified but krml C extraction failed. Avoid FStar.Seq — use lists instead. Fix and retry CODE.'
+                    continue
+                return code, None  # Success! (non-krml target)
             # Verification failed — re-prompt with actionable error
             short_err = stderr[-500:] if stderr else '(empty stderr)'
             # Detect common issues to give better feedback

@@ -1077,10 +1077,25 @@ def compile_veri(
     # contracts are rejected early, before Docker is invoked.
     lint_result = lint(str(path))
     if not lint_result.passed:
-        return CompileResult(
-            False, module_name, path, config.target or 'fstar',
-            error=f'Lint failed: {"; ".join(lint_result.errors[:3])}',
-        )
+        if config.use_docker and lint_result.errors:
+            tool_errors = [e for e in lint_result.errors
+                           if 'not found in PATH' in e
+                           or 'fstar.exe not found' in e
+                           or 'dafny not found' in e
+                           or 'F* not found' in e
+                           or 'Dafny not found' in e]
+            if len(tool_errors) == len(lint_result.errors):
+                pass  # Proceed to Docker — tools are inside the container
+            else:
+                return CompileResult(
+                    False, module_name, path, config.target or 'fstar',
+                    error=f'Lint failed: {"; ".join(lint_result.errors[:3])}',
+                )
+        else:
+            return CompileResult(
+                False, module_name, path, config.target or 'fstar',
+                error=f'Lint failed: {"; ".join(lint_result.errors[:3])}',
+            )
 
     if config.use_docker:
         # ── Everything runs inside Docker in one shot ──
