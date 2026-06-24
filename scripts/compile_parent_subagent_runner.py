@@ -628,11 +628,20 @@ def launch_agent(spec, target: str, agent_type: str, timeout: int,
                 full_module, spec.module_name, target,
                     suffix=file_ext, admit_smt=True)
             if passed:
+                # For fstar→C and fstar→OCaml targets, verify C extraction succeeds.
+                # These backends use KaRaMeL for C code generation; if krml fails
+                # (e.g. missing Seq implementation), re-prompt the agent to fix.
                 backend = _get_backend(target)
-                if dsl_lang == 'fstar':
+                krml_suffixes = {'c', 'ml'}  # fstar-c → c, fstar-ocaml → ml
+                if (hasattr(backend, 'output_suffix')
+                        and backend.output_suffix() in krml_suffixes):
                     out = compile_verified_code(code, spec, target, Path('/output'))
                     if not out:
-                        last_response = 'fstar passed but krml C extraction failed. Avoid FStar.Seq, use lists. Fix and retry CODE.'
+                        last_response = (
+                            'fstar verification passed but krml C extraction failed. '
+                            'Avoid FStar.Seq — use list-based operations instead. '
+                            'Fix and retry CODE.'
+                        )
                         continue
                 return code, None  # Success!
             # Verification failed — re-prompt with actionable error

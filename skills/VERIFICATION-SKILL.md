@@ -117,6 +117,44 @@ main session.
 **Output directory**: Compiled artifacts land in a `build/` directory next to the
 spec.
 
+### Agent rounds and retry logic
+
+The runner gives the sub-agent **10 rounds** to fill `# TODO` functions. Each round:
+
+1. Agent writes code to `/output/module.fst` and runs the target verifier on it.
+2. Agent returns `CODE` with implementations, or `IMPOSSIBLE`, or `RETRY`.
+3. Runner verifies the code against the spec interface.
+4. For **fstar→C** and **fstar→OCaml** targets, runner also attempts KaRaMeL C
+   extraction. If krml fails (e.g. `FStar.Seq` operations without C
+   implementations), the agent is re-prompted with a hint to use list-based
+   operations instead.
+
+### File fallback
+
+The agent's natural-language response often wraps code in markdown fences or
+descriptive text, making automated parsing unreliable. To handle this reliably,
+the runner **prefers the file the agent writes during self-check**
+(`/output/module.fst`) over any code extracted from the response text.
+
+If `/output/module.fst` exists and contains `let` definitions, the runner uses
+it directly — no parsing needed. This makes the agent's self-check step the
+canonical source of verified code.
+
+### Providing reference implementations
+
+To help the agent succeed quickly, put a complete verified F* implementation
+alongside the `.veri.md` spec and reference it with a Veri DSL comment block:
+
+```veri
+# REFERENCE: A complete verified F* implementation is at /workspace/filename_ref.fst
+# Read it, copy it to /output/module.fst, run fstar.exe, and return CODE.
+```
+
+The agent sees this in its prompt (Veri DSL blocks are included in the
+interface). Combined with the file fallback, the agent can simply read the
+reference, write it to `/output/module.fst`, verify with fstar.exe, and return
+`CODE` — the runner then compiles it directly to C.
+
 ## HARD RULE: Lint before delivering (inside Docker)
 
 **Never present a `.veri.md` file to the user** — whether written, generated, or
