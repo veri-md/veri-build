@@ -1084,9 +1084,7 @@ def compile_veri(
                            or 'dafny not found' in e
                            or 'F* not found' in e
                            or 'Dafny not found' in e]
-            if len(tool_errors) == len(lint_result.errors):
-                pass  # Proceed to Docker — tools are inside the container
-            else:
+            if len(tool_errors) != len(lint_result.errors):
                 return CompileResult(
                     False, module_name, path, config.target or 'fstar',
                     error=f'Lint failed: {"; ".join(lint_result.errors[:3])}',
