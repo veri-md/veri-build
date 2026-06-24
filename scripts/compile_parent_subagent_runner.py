@@ -652,7 +652,10 @@ def launch_agent(spec, target: str, agent_type: str, timeout: int,
                         last_response = (
                             'fstar verification passed but C extraction failed.\n'
                             f'Error:\n{krml_err[-500:]}\n'
-                            'Fix the code and retry CODE, or reply IMPOSSIBLE with specific reason.'
+                            'Run krml yourself as a self-check step before returning CODE:\n'
+                            '  fstar.exe --codegen krml --extract <Module> file.fst\n'
+                            '  krml -skip-compilation file.krml -tmpdir /tmp/c_out\n'
+                            'Fix any krml warnings, then retry CODE.'
                         )
                         continue
                 return code, None  # Success!
