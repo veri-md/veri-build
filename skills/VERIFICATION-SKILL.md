@@ -128,9 +128,9 @@ spec.
    iteration and judgment. If the agent inside Docker says IMPOSSIBLE, the
    outer agent judges whether to accept it or re-prompt with guidance.
 
-3. **NEVER kill Docker containers** — the pipeline manages its own lifecycle.
-   Let containers run to completion. If a run fails, the outer agent decides
-   whether to re-run with better guidance.
+3. **Clean up stale containers before re-running** — if a previous run left
+   orphaned containers, kill them before launching a new one to avoid port
+   or volume conflicts.
 
 4. **The outer agent is the judge** — it reads compile_veri results, evaluates
    errors, provides targeted guidance (e.g. "avoid FStar.Seq operations for C
