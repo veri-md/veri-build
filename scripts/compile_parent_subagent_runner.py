@@ -508,19 +508,18 @@ def launch_agent(spec, target: str, agent_type: str, timeout: int,
         sys.stderr.write(f'[agent raw] ({len(last_response)} chars) start: {last_response[:200]}\n')
 
         if last_response.startswith('IMPOSSIBLE:'):
-            # Don't give up — give specific guidance and re-prompt
+            # Judge the impossibility claim.
+            # If the agent is giving up due to krml/Seq issues, push back
+            # with specific actionable feedback. Otherwise accept it.
             reason = last_response[12:].strip() or '(no reason given)'
-            last_response = (
-                f'IMPOSSIBLE received: {reason}\n'
-                'Here is specific help:\n'
-                '- Use recursive functions on lists instead of FStar.Seq operations.\n'
-                '- FStar.Seq.length → write a recursive length helper.\n'
-                '- FStar.Seq.index → write a recursive index helper.\n'
-                '- Run krml yourself: fstar.exe --codegen krml --extract <M> file.fst && krml -skip-compilation file.krml -tmpdir c_out\n'
-                '- The krml tool MUST produce .c files with zero warnings.\n'
-                'Try again with CODE.'
-            )
-            continue
+            if any(kw in reason.lower() for kw in ('seq.', 'seq ', 'krml', 'c extraction', 'no c ')):
+                last_response = (
+                    f'IMPOSSIBLE rejected: {reason}\n'
+                    'This is fixable. Replace FStar.Seq operations with recursive helpers.\n'
+                    'Run krml yourself before returning CODE to verify C extraction works.'
+                )
+                continue
+            return None, last_response  # Accept genuine impossibility
 
         # Accept CODE prefix or bare definitions
         if last_response.startswith('CODE'):
