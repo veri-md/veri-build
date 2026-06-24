@@ -604,22 +604,36 @@ def launch_agent(spec, target: str, agent_type: str, timeout: int,
                     return name
                 return re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '_', name).lower()
             code = re.sub(r'\b([A-Z][a-zA-Z0-9]*[a-z][A-Za-z0-9]*)\b', _snake, code)
+        # If agent wrote /output/module.fst during self-check, prefer it over parsed response
+        for p in (Path('/output/module.fst'), Path('/tmp/output/module.fst')):
+            if p.exists():
+                content = p.read_text()
+                if 'let ' in content:
+                    sys.stderr.write(f'[fallback] using {p} ({len(content)} chars)\n')
+                    code = content
+                    break
+
         # Try to verify the code (with type definitions prepended)
         try:
-            # Generate the full module: spec types + agent implementation
-            types_text, _ = generate_target_interface(spec, target)
-            # Strip val/assume val declarations (F*) or function/method declarations (Dafny)
-            # from the interface so agent implementations don't conflict
-            if dsl_lang == 'fstar':
-                types_text = re.sub(r'^(assume\s+)?val\s+\w+.*?(\n\s|\n$)', '', types_text, flags=re.MULTILINE)
-            elif dsl_lang == 'dafny':
-                # Remove only the TODO declarations (keep helper predicates + types)
-                types_text = strip_todo_declarations(types_text, spec.todo_function_names)
-            full_module = types_text + '\n' + code
+            if code.lstrip().startswith('module '):
+                full_module = code
+            else:
+                types_text, _ = generate_target_interface(spec, target)
+                if dsl_lang == 'fstar':
+                    types_text = re.sub(r'^(assume\s+)?val\s+\w+.*?(\n\s|\n$)', '', types_text, flags=re.MULTILINE)
+                elif dsl_lang == 'dafny':
+                    types_text = strip_todo_declarations(types_text, spec.todo_function_names)
+                full_module = types_text + '\n' + code
             passed, stdout, stderr = verify_interface(
                 full_module, spec.module_name, target,
                     suffix=file_ext, admit_smt=True)
             if passed:
+                backend = _get_backend(target)
+                if hasattr(backend, 'output_suffix') and backend.output_suffix() in ('c', 'wasm'):
+                    out = compile_verified_code(code, spec, target, Path('/output'))
+                    if not out:
+                        last_response = 'fstar passed but krml C extraction failed. Avoid FStar.Seq, use lists. Fix and retry CODE.'
+                        continue
                 return code, None  # Success!
             # Verification failed — re-prompt with actionable error
             short_err = stderr[-500:] if stderr else '(empty stderr)'
