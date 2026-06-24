@@ -508,18 +508,16 @@ def launch_agent(spec, target: str, agent_type: str, timeout: int,
         sys.stderr.write(f'[agent raw] ({len(last_response)} chars) start: {last_response[:200]}\n')
 
         if last_response.startswith('IMPOSSIBLE:'):
-            # Judge the impossibility claim.
-            # If the agent is giving up due to krml/Seq issues, push back
-            # with specific actionable feedback. Otherwise accept it.
-            reason = last_response[12:].strip() or '(no reason given)'
-            if any(kw in reason.lower() for kw in ('seq.', 'seq ', 'krml', 'c extraction', 'no c ')):
+            # Let the agent give up — but only after exhausting all rounds.
+            # The parent relies on the agent's own judgment of impossibility.
+            if round_num < max_rounds:
+                reason = last_response[12:].strip() or '(no reason given)'
                 last_response = (
-                    f'IMPOSSIBLE rejected: {reason}\n'
-                    'This is fixable. Replace FStar.Seq operations with recursive helpers.\n'
-                    'Run krml yourself before returning CODE to verify C extraction works.'
+                    f'IMPOSSIBLE: {reason}\n'
+                    'Are you sure this is unfixable? Try a different approach before giving up.'
                 )
                 continue
-            return None, last_response  # Accept genuine impossibility
+            return None, last_response
 
         # Accept CODE prefix or bare definitions
         if last_response.startswith('CODE'):
