@@ -1071,14 +1071,16 @@ def compile_veri(
 
     module_name = config.module_name or path.stem
 
-    # Skip host-level lint when using Docker — all tools are inside the container
-    if not config.use_docker:
-        lint_result = lint(str(path))
-        if not lint_result.passed:
-            return CompileResult(
-                False, module_name, path, config.target or 'fstar',
-                error=f'Lint failed: {"; ".join(lint_result.errors[:3])}',
-            )
+    # ── Step 0: Run lint (verify API) first ──────────────────────────────
+    # compile_veri delegates to lint for spec validation. This ensures
+    # that specs with broken Veri DSL, missing TARGET, or unimplemented
+    # contracts are rejected early, before Docker is invoked.
+    lint_result = lint(str(path))
+    if not lint_result.passed:
+        return CompileResult(
+            False, module_name, path, config.target or 'fstar',
+            error=f'Lint failed: {"; ".join(lint_result.errors[:3])}',
+        )
 
     if config.use_docker:
         # ── Everything runs inside Docker in one shot ──

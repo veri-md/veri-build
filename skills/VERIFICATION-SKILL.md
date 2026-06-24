@@ -117,29 +117,6 @@ main session.
 **Output directory**: Compiled artifacts land in a `build/` directory next to the
 spec.
 
-### Agent rounds and retry logic
-
-The runner gives the sub-agent **10 rounds** to fill `# TODO` functions. Each round:
-
-1. Agent writes code to `/output/module.fst` and runs the target verifier on it.
-2. Agent returns `CODE` with implementations, or `IMPOSSIBLE`, or `RETRY`.
-3. Runner verifies the code against the spec interface.
-4. For **fstar→C** and **fstar→OCaml** targets, runner also attempts KaRaMeL C
-   extraction. If krml fails (e.g. `FStar.Seq` operations without C
-   implementations), the agent is re-prompted with a hint to use list-based
-   operations instead.
-
-### File fallback
-
-The agent's natural-language response often wraps code in markdown fences or
-descriptive text, making automated parsing unreliable. To handle this reliably,
-the runner **prefers the file the agent writes during self-check**
-(`/output/module.fst`) over any code extracted from the response text.
-
-If `/output/module.fst` exists and contains `let` definitions, the runner uses
-it directly — no parsing needed. This makes the agent's self-check step the
-canonical source of verified code.
-
 ## HARD RULE: Lint before delivering (inside Docker)
 
 **Never present a `.veri.md` file to the user** — whether written, generated, or

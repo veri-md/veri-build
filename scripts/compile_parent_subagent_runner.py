@@ -27,7 +27,6 @@ import json
 import os
 import re
 import subprocess
-import io
 import sys
 import tempfile
 from pathlib import Path
@@ -474,17 +473,14 @@ def launch_agent(spec, target: str, agent_type: str, timeout: int,
         f"  1. Write .{file_ext} to /output/module.{file_ext}\n"
         f"  2. {verifier_cmd} /output/module.{file_ext}\n"
         f"{self_check_lines}"
-        f"Only return CODE if both pass.\n"
-        f"The runner reads /output/module.{file_ext} after self-check — it is the\n"
-        f"canonical source of your code, preferred over response text. Ensure this\n"
-        f"file is complete and correct before returning CODE.\n\n"
+        f"Only return CODE if both pass.\n\n"
         f"{output_note}"
         f"Return:\n"
         f"{code_block_format}"
         f"\nOr: IMPOSSIBLE: <reason>\nOr: RETRY: <what you need>"
     )
 
-    max_rounds = 10
+    max_rounds = 3
     for round_num in range(1, max_rounds + 1):
         if round_num == 1:
             prompt = base_prompt
@@ -508,16 +504,7 @@ def launch_agent(spec, target: str, agent_type: str, timeout: int,
         sys.stderr.write(f'[agent raw] ({len(last_response)} chars) start: {last_response[:200]}\n')
 
         if last_response.startswith('IMPOSSIBLE:'):
-            # Let the agent give up — but only after exhausting all rounds.
-            # The parent relies on the agent's own judgment of impossibility.
-            if round_num < max_rounds:
-                reason = last_response[12:].strip() or '(no reason given)'
-                last_response = (
-                    f'IMPOSSIBLE: {reason}\n'
-                    'Are you sure this is unfixable? Try a different approach before giving up.'
-                )
-                continue
-            return None, last_response
+            return None, last_response  # Report impossibility clearly
 
         # Accept CODE prefix or bare definitions
         if last_response.startswith('CODE'):
@@ -617,58 +604,22 @@ def launch_agent(spec, target: str, agent_type: str, timeout: int,
                     return name
                 return re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '_', name).lower()
             code = re.sub(r'\b([A-Z][a-zA-Z0-9]*[a-z][A-Za-z0-9]*)\b', _snake, code)
-        # If agent wrote /output/module.fst during self-check, prefer it over parsed response
-        for p in (Path('/output/module.fst'), Path('/tmp/output/module.fst')):
-            if p.exists():
-                content = p.read_text()
-                if 'let ' in content:
-                    sys.stderr.write(f'[fallback] using {p} ({len(content)} chars)\n')
-                    code = content
-                    break
-
         # Try to verify the code (with type definitions prepended)
         try:
-            if code.lstrip().startswith('module '):
-                full_module = code
-            else:
-                types_text, _ = generate_target_interface(spec, target)
-                if dsl_lang == 'fstar':
-                    types_text = re.sub(r'^(assume\s+)?val\s+\w+.*?(\n\s|\n$)', '', types_text, flags=re.MULTILINE)
-                elif dsl_lang == 'dafny':
-                    types_text = strip_todo_declarations(types_text, spec.todo_function_names)
-                full_module = types_text + '\n' + code
+            # Generate the full module: spec types + agent implementation
+            types_text, _ = generate_target_interface(spec, target)
+            # Strip val/assume val declarations (F*) or function/method declarations (Dafny)
+            # from the interface so agent implementations don't conflict
+            if dsl_lang == 'fstar':
+                types_text = re.sub(r'^(assume\s+)?val\s+\w+.*?(\n\s|\n$)', '', types_text, flags=re.MULTILINE)
+            elif dsl_lang == 'dafny':
+                # Remove only the TODO declarations (keep helper predicates + types)
+                types_text = strip_todo_declarations(types_text, spec.todo_function_names)
+            full_module = types_text + '\n' + code
             passed, stdout, stderr = verify_interface(
                 full_module, spec.module_name, target,
                     suffix=file_ext, admit_smt=True)
             if passed:
-                # For fstar→C and fstar→WASM targets, verify C extraction succeeds.
-                # These backends use KaRaMeL for C code generation; if krml fails,
-                # capture the error and re-prompt the agent with specific guidance.
-                backend = _get_backend(target)
-                krml_suffixes = {'c', 'wasm'}
-                if (hasattr(backend, 'output_suffix')
-                        and backend.output_suffix() in krml_suffixes):
-                    import io
-                    _capture = io.StringIO()
-                    _old_stdout = sys.stdout
-                    sys.stdout = _capture
-                    try:
-                        out = compile_verified_code(code, spec, target, Path('/output'))
-                    finally:
-                        sys.stdout = _old_stdout
-                    if not out:
-                        krml_err = _capture.getvalue().strip()
-                        last_response = (
-                            'fstar verification passed but krml C extraction failed.\n'
-                            f'Error:\n{krml_err[-500:]}\n'
-                            'To fix: avoid FStar.Seq.length, FStar.Seq.index, and other Seq operations.\n'
-                            'Replace with recursive helper functions that work on lists.\n'
-                            'Run krml yourself to verify C extraction before returning CODE:\n'
-                            '  fstar.exe --codegen krml --extract <Module> file.fst\n'
-                            '  krml -skip-compilation file.krml -tmpdir /tmp/c_out\n'
-                            'Only return CODE when krml produces .c files with NO warnings.'
-                        )
-                        continue
                 return code, None  # Success!
             # Verification failed — re-prompt with actionable error
             short_err = stderr[-500:] if stderr else '(empty stderr)'
