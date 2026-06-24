@@ -629,7 +629,7 @@ def launch_agent(spec, target: str, agent_type: str, timeout: int,
                     suffix=file_ext, admit_smt=True)
             if passed:
                 backend = _get_backend(target)
-                if hasattr(backend, 'output_suffix') and backend.output_suffix() in ('c', 'wasm'):
+                if dsl_lang == 'fstar':
                     out = compile_verified_code(code, spec, target, Path('/output'))
                     if not out:
                         last_response = 'fstar passed but krml C extraction failed. Avoid FStar.Seq, use lists. Fix and retry CODE.'
