@@ -27,6 +27,7 @@ import json
 import os
 import re
 import subprocess
+import io
 import sys
 import tempfile
 from pathlib import Path
@@ -631,19 +632,27 @@ def launch_agent(spec, target: str, agent_type: str, timeout: int,
                 full_module, spec.module_name, target,
                     suffix=file_ext, admit_smt=True)
             if passed:
-                # For fstar→C and fstar→OCaml targets, verify C extraction succeeds.
-                # These backends use KaRaMeL for C code generation; if krml fails
-                # (e.g. missing Seq implementation), re-prompt the agent to fix.
+                # For fstar→C and fstar→WASM targets, verify C extraction succeeds.
+                # These backends use KaRaMeL for C code generation; if krml fails,
+                # capture the error and re-prompt the agent with specific guidance.
                 backend = _get_backend(target)
-                krml_suffixes = {'c', 'wasm'}  # only C and WASM use KaRaMeL
+                krml_suffixes = {'c', 'wasm'}
                 if (hasattr(backend, 'output_suffix')
                         and backend.output_suffix() in krml_suffixes):
-                    out = compile_verified_code(code, spec, target, Path('/output'))
+                    import io
+                    _capture = io.StringIO()
+                    _old_stdout = sys.stdout
+                    sys.stdout = _capture
+                    try:
+                        out = compile_verified_code(code, spec, target, Path('/output'))
+                    finally:
+                        sys.stdout = _old_stdout
                     if not out:
+                        krml_err = _capture.getvalue().strip()
                         last_response = (
-                            'fstar verification passed but krml C extraction failed. '
-                            'Avoid FStar.Seq — use list-based operations instead. '
-                            'Fix and retry CODE.'
+                            'fstar verification passed but C extraction failed.\n'
+                            f'Error:\n{krml_err[-500:]}\n'
+                            'Fix the code and retry CODE, or reply IMPOSSIBLE with specific reason.'
                         )
                         continue
                 return code, None  # Success!
