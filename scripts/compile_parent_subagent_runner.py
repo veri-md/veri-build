@@ -635,7 +635,7 @@ def launch_agent(spec, target: str, agent_type: str, timeout: int,
                 # These backends use KaRaMeL for C code generation; if krml fails
                 # (e.g. missing Seq implementation), re-prompt the agent to fix.
                 backend = _get_backend(target)
-                krml_suffixes = {'c', 'ml'}  # fstar-c → c, fstar-ocaml → ml
+                krml_suffixes = {'c', 'wasm'}  # only C and WASM use KaRaMeL
                 if (hasattr(backend, 'output_suffix')
                         and backend.output_suffix() in krml_suffixes):
                     out = compile_verified_code(code, spec, target, Path('/output'))
