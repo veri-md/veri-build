@@ -117,6 +117,26 @@ main session.
 **Output directory**: Compiled artifacts land in a `build/` directory next to the
 spec.
 
+### ⛔ CRITICAL RULES — DO NOT BREAK
+
+1. **NEVER run `compile_veri` directly in Bash** — always use the Agent tool to
+   spawn a sub-agent. The sub-agent is an LLM that can read results, judge
+   errors, and iterate intelligently. Raw Bash cannot do this.
+
+2. **NEVER modify `compile_parent_subagent_runner.py` or `pipeline.py`** — the
+   runner inside Docker is not your concern. The outer agent handles all
+   iteration and judgment. If the agent inside Docker says IMPOSSIBLE, the
+   outer agent judges whether to accept it or re-prompt with guidance.
+
+3. **NEVER kill Docker containers** — the pipeline manages its own lifecycle.
+   Let containers run to completion. If a run fails, the outer agent decides
+   whether to re-run with better guidance.
+
+4. **The outer agent is the judge** — it reads compile_veri results, evaluates
+   errors, provides targeted guidance (e.g. "avoid FStar.Seq operations for C
+   targets"), and re-runs compile_veri as needed. This is the correct loop.
+   You do not need to modify any Python code to make this work.
+
 ## HARD RULE: Lint before delivering (inside Docker)
 
 **Never present a `.veri.md` file to the user** — whether written, generated, or
