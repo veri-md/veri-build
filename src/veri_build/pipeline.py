@@ -1320,13 +1320,116 @@ def _compile_dafny_to_rust(dfy_path: Path, module_name: str,
 
 # ── CLI entry points ─────────────────────────────────────────────────────────
 
+def _internal_target(user_target: Optional[str]) -> Optional[str]:
+    """Map a user-facing target name to the internal verifier name.
+
+    Returns None for None (so compile_veri autodetects from the spec). Unknown
+    names pass through unchanged.
+    """
+    if user_target in ('c', 'f-star-c', 'fstar-c'):
+        return 'fstar'
+    if user_target in ('rust', 'dafny-rust'):
+        return 'dafny'
+    return user_target
+
+
+def _copy_clean_artifacts(scratch_dir: Path, output_dir: Path,
+                          module_name: str) -> List[Path]:
+    """Copy the clean artifacts from a build scratch dir into output_dir.
+
+    Copies the verified Dafny module ({Module}.dfy) and the extracted Rust
+    (rs/{Module}-rust/src/{Module}.rs → {Module}.rs). Verifier scratch
+    (run_log/, intermediate rounds, the cargo wrapper) is left behind under
+    scratch_dir. Returns the list of destination paths actually written.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    copied: List[Path] = []
+
+    dfy = scratch_dir / f'{module_name}.dfy'
+    if dfy.is_file():
+        dest = output_dir / dfy.name
+        shutil.copy2(dfy, dest)
+        copied.append(dest)
+
+    rs = scratch_dir / 'rs' / f'{module_name}-rust' / 'src' / f'{module_name}.rs'
+    if not rs.is_file():
+        matches = sorted(scratch_dir.glob('rs/*/src/*.rs'))
+        rs = matches[0] if matches else rs
+    if rs.is_file():
+        dest = output_dir / f'{module_name}.rs'
+        shutil.copy2(rs, dest)
+        copied.append(dest)
+
+    return copied
+
+
+def _cmd_build(args) -> None:
+    """`build <name>`: build one configured module from .veri/veri.toml."""
+    from veri_build.config import (
+        ConfigError, find_project_root, load_config, lookup_module, resolve_key,
+    )
+
+    try:
+        root = find_project_root(Path.cwd())
+        cfg = load_config(root)
+        mod = lookup_module(cfg, args.path)
+    except ConfigError as e:
+        print(f'❌ {e}')
+        sys.exit(1)
+
+    # Resolve the API key from config and export it so compile_veri's Docker
+    # passthrough picks it up. An already-set env var always wins.
+    try:
+        key = resolve_key(cfg, 'anthropic')
+    except ConfigError as e:
+        print(f'❌ {e}')
+        sys.exit(1)
+    if key and not os.environ.get('ANTHROPIC_API_KEY'):
+        os.environ['ANTHROPIC_API_KEY'] = key
+
+    scratch_dir = root / '.veri' / 'build' / mod.name
+
+    cfg_compile = CompilerConfig(
+        target=_internal_target(mod.target),
+        agent=mod.agent or 'claude',
+        timeout_seconds=mod.timeout if mod.timeout is not None else args.timeout,
+        output_dir=str(scratch_dir),
+        module_name=mod.module_name,
+        use_docker=not args.no_docker,
+        verify=not args.no_verify,
+    )
+
+    print(f'🔨 building {mod.name}: {mod.spec} → {mod.output}')
+    result = compile_veri(str(mod.spec), cfg_compile)
+    if not result.success:
+        print(f'❌ Build failed: {result.error}')
+        sys.exit(1)
+
+    copied = _copy_clean_artifacts(scratch_dir, mod.output, result.module_name)
+
+    print(f'✅ Built {mod.name}')
+    print(f'  Module: {result.module_name}')
+    print(f'  Target: {result.target}')
+    if result.verification_passed:
+        print(f'  Verification: ✅ passed')
+    else:
+        print(f'  Verification: ⚠️  needs review')
+    if copied:
+        for dest in copied:
+            print(f'  Artifact: {dest}')
+    else:
+        print(f'  ⚠️  no artifacts found in {scratch_dir}')
+    print(f'  Scratch:  {scratch_dir}')
+
+
 def main():
     """Simple CLI for the pipeline APIs."""
     import argparse
     parser = argparse.ArgumentParser(description='Veri DSL Pipeline Toolkit')
-    parser.add_argument('action', choices=['lint', 'convert', 'compile'],
+    parser.add_argument('action', choices=['lint', 'convert', 'compile', 'build'],
                         help='Pipeline action to run')
-    parser.add_argument('path', help='Path to .veri.md file')
+    parser.add_argument('path',
+                        help="Path to .veri.md file (or module name for 'build')")
     parser.add_argument('--target', choices=['c', 'rust', 'f-star-c', 'dafny-rust'], default=None,
                         help='Output target (default: read from Veri DSL spec)')
     parser.add_argument('--agent', choices=['openclaw', 'claude'], default='claude',
@@ -1361,14 +1464,12 @@ def main():
         veri_text = convert_fstar_to_veri(fstar_text)
         print(veri_text)
 
+    elif args.action == 'build':
+        _cmd_build(args)
+
     elif args.action == 'compile':
         # Map user-facing targets to internal targets
-        user_target = args.target
-        internal_target = None
-        if user_target in ('c', 'f-star-c'):
-            internal_target = 'fstar'
-        elif user_target in ('rust', 'dafny-rust'):
-            internal_target = 'dafny'
+        internal_target = _internal_target(args.target)
 
         cfg = CompilerConfig(
             target=internal_target,
